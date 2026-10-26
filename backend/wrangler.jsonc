@@ -1,7 +1,9 @@
 {
   "name": "royal-gems-api",
+  "account_id": "d9356aed1321204141743957dad5257f",
   "main": "worker.ts",
-  "compatibility_date": "2026-10-01",
-  "vars": { "ALLOWED_ORIGINS": "http://127.0.0.1:5173,http://127.0.0.1:4173" },
-  "d1_databases": [{ "binding": "DB", "database_name": "royal-gems", "database_id": "REPLACE_WITH_D1_DATABASE_ID", "migrations_dir": "migrations" }]
+  "compatibility_date": "2026-10-26",
+  "observability": { "enabled": true, "logs": { "enabled": true, "head_sampling_rate": 0.1 }, "traces": { "enabled": true, "head_sampling_rate": 0.01 } },
+  "vars": { "ALLOWED_ORIGINS": "https://yaozhiweiff.github.io,http://127.0.0.1:5173,http://127.0.0.1:4173" },
+  "d1_databases": [{ "binding": "DB", "database_name": "royal-gems", "database_id": "bcdec6eb-b757-4424-89c4-bbbcc398517d", "migrations_dir": "migrations" }]
 }

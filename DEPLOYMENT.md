@@ -28,6 +28,14 @@
 4. 运行 Pages 工作流；构建会使用 `/<仓库名>/` 作为资源路径。工作流成功后，以返回的 Pages 地址作为正式访问地址。
 5. 用两个独立浏览器验证重名注册被拒绝、账号自动识别，以及不同玩家在三榜中的成绩可见。
 
-当前没有真实仓库或后端连接时，上述配置只是发布准备，不能视为已经上线。
+## 当前部署
+
+- 游戏：https://yaozhiweiff.github.io/royal-gems/
+- 仓库：https://github.com/yaozhiweiff/royal-gems
+- API：https://royal-gems-api.royal-gems.workers.dev （健康检查 `/api/health`）
+- D1：`royal-gems`，账号和数据库标识记录在 `backend/wrangler.jsonc`，它们不是访问密钥。
+- 前端已设置仓库变量 `VITE_API_URL`，推送 main 自动发布。后端可通过本机已授权的 Wrangler 部署；GitHub 后端工作流只有安全配置对应 Secrets 后才能使用。
+- 本机 Cloudflare 配置位于 `D:/Tools/Cloudflare/config`，访问凭据加密保存，密钥由 Windows 凭据管理器保管；不要提交此目录。
+- `npm run test:public` 在真实线上创建两个临时验收账号、完成30次界面交换并验证跨浏览器榜单。报告在 `test-results/public/report.json`；执行后用生成的 `cleanup.sql` 清理这些验收账号：`npx wrangler d1 execute DB --remote --config backend/wrangler.jsonc --file test-results/public/cleanup.sql`。该SQL只包含本次验收创建的明确玩家ID，不影响其他玩家。
 
 参考：[GitHub Pages 工作流](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)、[Vite 子路径部署](https://vite.dev/guide/static-deploy)、[D1 绑定 API](https://developers.cloudflare.com/d1/worker-api/)、[D1 数据库迁移](https://developers.cloudflare.com/d1/reference/migrations/)。

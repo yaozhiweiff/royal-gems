@@ -28,7 +28,7 @@ jobs:
       - name: Check backend address
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
-        run: node -e "if(!process.env.VITE_API_URL?.startsWith('https://')) throw Error('Set repository variable VITE_API_URL to the deployed HTTPS backend URL first')"
+        run: node -e "const url=process.env.VITE_API_URL; if(!url?.startsWith('https://')) throw Error('Set repository variable VITE_API_URL first'); const r=await fetch(url+'/api/health'); if(!r.ok || !(await r.json()).ok) throw Error('Backend health check failed')" --input-type=module
       - name: Build
         run: npm run build
         env:

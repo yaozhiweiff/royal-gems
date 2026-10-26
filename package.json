@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:api": "node scripts/api-server.mjs",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc --noEmit -p backend/tsconfig.json && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:browser": "node scripts/playtest.mjs",
@@ -17,7 +17,8 @@
     "test:combinations": "node scripts/combinations-playtest.mjs",
     "test:challenge": "node scripts/challenge-playtest.mjs",
     "test:best-turns": "node scripts/best-turns-playtest.mjs",
-    "test:online": "node scripts/online-playtest.mjs"
+    "test:online": "node scripts/online-playtest.mjs",
+    "test:public": "node scripts/public-playtest.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"
