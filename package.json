@@ -1,0 +1,34 @@
+{
+  "name": "royal-gems",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:api": "node scripts/api-server.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run",
+    "test:browser": "node scripts/playtest.mjs",
+    "test:inspection": "node scripts/special-gem-inspection.mjs",
+    "test:effects": "node scripts/clear-effects-playtest.mjs",
+    "test:roles-motion": "node scripts/roles-motion-playtest.mjs",
+    "test:creation": "node scripts/special-creation-playtest.mjs",
+    "test:combinations": "node scripts/combinations-playtest.mjs",
+    "test:challenge": "node scripts/challenge-playtest.mjs",
+    "test:best-turns": "node scripts/best-turns-playtest.mjs",
+    "test:online": "node scripts/online-playtest.mjs"
+  },
+  "dependencies": {
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "esbuild": "0.28.2",
+    "sharp": "^0.35.5",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "vitest": "^5.0.5",
+    "wrangler": "4.152.0"
+  }
+}
