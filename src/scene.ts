@@ -21,7 +21,7 @@ export class BoardScene extends Phaser.Scene {
   private selected: number | null = null;
   private down: { cell: number; x: number; y: number; inspect: boolean } | null = null;
   private board: Board;
-  private pendingClick: { cell: number; tileId: number; timer: Phaser.Time.TimerEvent } | null = null;
+  private pendingClick: { cell: number; tileId: number; committed: boolean; timer: Phaser.Time.TimerEvent } | null = null;
   private selection!: Phaser.GameObjects.Graphics;
   private hintMarks: Phaser.GameObjects.Graphics[] = [];
   private keyboardCell = 0;
@@ -45,6 +45,7 @@ export class BoardScene extends Phaser.Scene {
     this.onClear = onClear; this.latest = initial;
   }
   getBoardLayout() { return { width: this.layout.width, height: this.layout.height, rowHeight: this.layout.rowHeight }; }
+  getInputStats() { return { selected: this.selected, pending: !!this.pendingClick }; }
   setLayoutBusy(busy: boolean) { this.layoutBusy = busy; if (!busy) this.setSquareLayout(this.wantedSquare); }
   setSquareLayout(square: boolean) {
     this.wantedSquare = square;
@@ -171,7 +172,7 @@ export class BoardScene extends Phaser.Scene {
   private commitPendingClick() {
     const pending = this.pendingClick;
     this.cancelPendingClick();
-    if (pending && this.enabled && this.board[pending.cell]?.id === pending.tileId) this.clickCell(pending.cell);
+    if (pending && !pending.committed && this.enabled && this.board[pending.cell]?.id === pending.tileId) this.clickCell(pending.cell);
   }
   private tapCell(cell: number) {
     const tile = this.board[cell];
@@ -184,10 +185,13 @@ export class BoardScene extends Phaser.Scene {
     this.commitPendingClick();
     if (!this.enabled) return;
     if (tile.special === 'normal') { this.clickCell(cell); return; }
-    // Delay only a special gem's single tap, so an adjacent selection cannot turn
-    // the first half of a double tap into a swap (especially for an ultimate).
+    // Highlight a first selection immediately. Only an actual swap into a special
+    // waits for double-tap recognition, so inspecting it cannot consume a move.
+    const selected = this.selected;
+    const deferred = selected !== null && Math.abs(selected % COLS - cell % COLS) + Math.abs(Math.floor(selected / COLS) - Math.floor(cell / COLS)) === 1;
+    if (deferred) this.showHint([cell], false); else this.clickCell(cell);
     const timer = this.time.delayedCall(DOUBLE_TAP_MS, () => this.commitPendingClick());
-    this.pendingClick = { cell, tileId: tile.id, timer };
+    this.pendingClick = { cell, tileId: tile.id, committed: !deferred, timer };
   }
   private inspectCell(cell: number) {
     const tile = this.board[cell];

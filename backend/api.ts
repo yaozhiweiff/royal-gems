@@ -28,7 +28,7 @@ async function body(request: Request) {
   } finally { reader.releaseLock(); }
   const bytes = new Uint8Array(size); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  const text = new TextDecoder().decode(bytes); if (text.length > 2048) fail(413, 'TOO_LARGE', '请求过大');
+  const text = new TextDecoder().decode(bytes); if (text.length > 4096) fail(413, 'TOO_LARGE', '请求过大');
   try { const data = JSON.parse(text); if (data && typeof data === 'object' && !Array.isArray(data)) return data; } catch { /* handled below */ }
   return fail(400, 'INVALID_JSON', '请求格式错误');
 }
@@ -92,7 +92,36 @@ async function route(request: Request, db: Database): Promise<Response> {
     await db.prepare('DELETE FROM runs WHERE created_at < ?').bind(Date.now() - 86400000 * 2).run();
     await db.prepare('INSERT INTO runs(id,player_id,mode,character,seed,created_at) VALUES(?,?,?,?,?,?)').bind(id, player.id, data.mode, data.character, seed, Date.now()).run();
     const game = new GameEngine(data.mode, seededRandom(seed), data.character); game.start();
-    return json({ runId: id, revision: 0, state: game.snapshot() }, 201);
+    return json({ runId: id, seed, revision: 0, state: game.snapshot() }, 201);
+  }
+  const completePath = path.match(/^\/api\/runs\/([a-f0-9-]{36})\/complete$/);
+  if (completePath && method === 'POST') {
+    const data = await body(request);
+    if (!Array.isArray(data.actions) || !data.actions.length || data.actions.length > 500 || !data.actions.every((pair: unknown) => Array.isArray(pair) && pair.length === 2 && pair.every(n => Number.isSafeInteger(n) && n >= 0 && n < 56))) fail(400, 'INVALID_RESULT', '本局行动记录格式错误');
+    const run = await db.prepare('SELECT * FROM runs WHERE id = ? AND player_id = ?').bind(completePath[1], player.id).first<Run>();
+    if (!run || run.created_at < Date.now() - 86400000) fail(404, 'RUN_EXPIRED', '对局不存在或已过期，请重新开始');
+    const current = run!, actions = data.actions as [number, number][], encoded = JSON.stringify(actions);
+    if (current.finished && current.actions !== encoded) fail(409, 'RUN_FINISHED', '此对局已提交另一份成绩');
+    if (!current.finished && current.revision !== 0) fail(409, 'STALE_MOVE', '此对局已通过另一页面操作');
+    const game = new GameEngine(current.mode, seededRandom(current.seed), current.character); game.start();
+    for (const pair of actions) {
+      const before = game.state.moves; game.move(...pair);
+      if (game.state.moves !== before + 1) fail(400, 'INVALID_RESULT', '本局行动记录不完整或无效');
+    }
+    const state = game.snapshot();
+    if (state.status !== 'won' && state.status !== 'completed') fail(400, 'INVALID_RESULT', '完成有效对局后才能提交成绩');
+    if (!current.finished) {
+      const value = current.mode === 'challenge' ? state.score : state.moves, direction = current.mode === 'challenge' ? '>' : '<';
+      const result = await db.batch([
+        db.prepare('UPDATE runs SET actions = ?, revision = ?, last_nonce = ?, finished = 1 WHERE id = ? AND revision = 0 AND finished = 0').bind(encoded, actions.length, 'batch-v1', current.id),
+        db.prepare(`INSERT INTO records(player_id,mode,character,value,achieved_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runs WHERE id = ? AND finished = 1 AND actions = ?) ON CONFLICT(player_id,mode) DO UPDATE SET character = excluded.character, value = excluded.value, achieved_at = excluded.achieved_at WHERE excluded.value ${direction} records.value`).bind(player.id, current.mode, current.character, value, Date.now(), current.id, encoded),
+      ]) as { meta: { changes: number } }[];
+      if (!result[0].meta.changes) {
+        const saved = await db.prepare('SELECT actions, finished FROM runs WHERE id = ?').bind(current.id).first<{ actions: string; finished: number }>();
+        if (!saved?.finished || saved.actions !== encoded) fail(409, 'RUN_FINISHED', '此对局已提交另一份成绩');
+      }
+    }
+    return json({ state, bests: await personalBests(db, player) });
   }
   const movePath = path.match(/^\/api\/runs\/([a-f0-9-]{36})\/move$/);
   if (movePath && method === 'POST') {

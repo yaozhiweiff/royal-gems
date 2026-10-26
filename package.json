@@ -20,7 +20,8 @@
     "test:online": "node scripts/online-playtest.mjs",
     "test:public": "node scripts/public-playtest.mjs",
     "test:ranking-restart": "node scripts/ranking-restart-playtest.mjs",
-    "test:mobile-layout": "node scripts/mobile-layout-playtest.mjs"
+    "test:mobile-layout": "node scripts/mobile-layout-playtest.mjs",
+    "test:latency": "node scripts/local-latency-playtest.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"

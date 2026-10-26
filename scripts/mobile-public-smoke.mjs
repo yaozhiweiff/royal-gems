@@ -3,7 +3,7 @@ import { build } from 'esbuild';
 import { mkdir, writeFile } from 'node:fs/promises';
 const output = 'test-results/mobile-public'; await mkdir(output, { recursive: true });
 await build({ entryPoints: ['src/engine.ts'], outfile: '.data/mobile-test-engine.mjs', bundle: true, format: 'esm', platform: 'node' });
-const { findMove } = await import('../.data/mobile-test-engine.mjs');
+const { findMove, GameEngine, seededRandom } = await import('../.data/mobile-test-engine.mjs');
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
 const page = await context.newPage(), cdp = await context.newCDPSession(page), errors = [];
@@ -21,22 +21,23 @@ try {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.locator('[data-character="1"]').tap(); await page.locator('[data-difficulty="challenge"]').tap();
   const started = page.waitForResponse(r => new URL(r.url()).pathname === '/api/runs' && r.request().method() === 'POST');
-  await page.locator('#start').tap(); let state = (await (await started).json()).state;
+  await page.locator('#start').tap(); const start = await (await started).json();
+  const mirror = new GameEngine('challenge', seededRandom(start.seed), 'lance'); mirror.start(); let state = mirror.snapshot();
   await expect(page.locator('#hint')).toBeEnabled();
   for (const step of ['match', 'bottom-row']) {
     const pair = step === 'match' ? findMove(state.board) : [55, 54];
     await page.locator('canvas').scrollIntoViewIfNeeded(); const box = await page.locator('canvas').boundingBox();
     const point = i => ({ x: box.x + (12 + (i % 8 + .5) * 90) / 744 * box.width, y: box.y + (12 + (Math.floor(i / 8) + .5) * (720 / 7)) / 744 * box.height });
-    const moved = page.waitForResponse(r => /\/api\/runs\/.+\/move$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST');
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...point(pair[0]), id: 1 }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...point(pair[1]), id: 1 }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    const response = await moved; expect(response.status()).toBe(200); expect(response.request().postDataJSON()).toMatchObject({ a: pair[0], b: pair[1] });
-    state = (await response.json()).state; await expect(page.locator('#hint')).toBeEnabled({ timeout: 60000 });
+    mirror.move(...pair); state = mirror.snapshot();
+    await expect(page.locator('#hint')).toBeDisabled(); await expect(page.locator('#hint')).toBeEnabled({ timeout: 60000 });
+    await expect(page.locator('#score')).toHaveText(state.score.toLocaleString('en-US'));
   }
   expect(state.moves).toBeGreaterThan(0); expect(errors).toEqual([]);
   await page.screenshot({ path: `${output}/phone.png`, fullPage: true });
-  console.log('PASS: public phone layout places heroes above a wider square board; actual touch matches and bottom-row swaps reach the correct server cells.');
+  console.log('PASS: public phone layout and local touch matches, including the bottom row, match a deterministic replay.');
 } catch (error) { failure = error; console.error(error); }
 finally {
   await writeFile(`${output}/report.json`, JSON.stringify({ passed: !failure, errors, playerId: player?.id, failure: failure?.stack }, null, 2));

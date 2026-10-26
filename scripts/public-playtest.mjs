@@ -3,14 +3,16 @@ import { build } from 'esbuild';
 import { mkdir, writeFile } from 'node:fs/promises';
 await mkdir('test-results/public', { recursive: true });
 await build({ entryPoints: ['src/engine.ts'], outfile: '.data/test-engine.mjs', bundle: true, format: 'esm', platform: 'node' });
-const { findMove } = await import('../.data/test-engine.mjs');
+const { findMove, GameEngine, seededRandom } = await import('../.data/test-engine.mjs');
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const url = process.env.GAME_URL || 'https://yaozhiweiff.github.io/royal-gems/';
 const ids = [], errors = [], checks = [], name = `验收${Date.now().toString().slice(-10)}`;
+let stepRequests = 0;
 const pass = message => { checks.push(message); console.log('PASS', message); };
 async function open(viewport) {
   const context = await browser.newContext({ viewport }); const page = await context.newPage();
   page.on('pageerror', e => errors.push(e.message));
+  page.on('request', r => { if (/\/api\/runs\/.+\/move$/.test(new URL(r.url()).pathname)) stepRequests++; });
   page.on('response', async r => { if (new URL(r.url()).pathname === '/api/register' && r.status() === 201) ids.push((await r.json()).player.id); });
   await page.goto(url, { waitUntil: 'networkidle' }); return page;
 }
@@ -31,7 +33,8 @@ try {
   await p.locator('[data-difficulty="challenge"]').click();
   await p.locator('[data-character="1"]').click();
   const started = p.waitForResponse(r => new URL(r.url()).pathname === '/api/runs' && r.request().method() === 'POST');
-  await p.locator('#start').click(); let state = (await (await started).json()).state;
+  await p.locator('#start').click(); const start = await (await started).json();
+  const mirror = new GameEngine('challenge', seededRandom(start.seed), 'lance'); mirror.start(); let state = mirror.snapshot();
   await p.screenshot({ path: 'test-results/public/game.png', fullPage: true });
   for (let turn = 0; turn < 30; turn++) {
     await expect(p.locator('#hint')).toBeEnabled({ timeout: 60000 });
@@ -39,12 +42,12 @@ try {
     const box = await p.locator('canvas').boundingBox();
     const point = i => ({ x: box.x + (12 + (i % 8 + .5) * 90) / 744 * box.width, y: box.y + (12 + (Math.floor(i / 8) + .5) * 90) / 654 * box.height });
     const a = point(pair[0]), b = point(pair[1]);
-    const moved = p.waitForResponse(r => /\/api\/runs\/.+\/move$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST');
     await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(b.x, b.y, { steps: 4 }); await p.mouse.up();
-    const response = await moved; expect(response.status()).toBe(200); state = (await response.json()).state;
+    mirror.move(...pair); state = mirror.snapshot();
     expect(state.moves).toBe(turn + 1); console.log(`TURN ${turn + 1}: ${state.score}`);
   }
   await expect(p.locator('#modal-title')).toHaveText('挑战完成', { timeout: 60000 });
+  await expect(p.locator('#result-sync')).toHaveText('成绩已提交', { timeout: 40000 });
   expect(state.status).toBe('completed');
   await p.locator('#result-rankings').click();
   await expect(p.locator('#ranking-status')).toContainText('当前第');
@@ -53,7 +56,7 @@ try {
   await expect(p.locator('.challenge-table')).toContainText('兰斯');
   await expect(p.locator('.challenge-table')).toContainText(state.score.toLocaleString('en-US'));
   await p.screenshot({ path: 'test-results/public/ranking.png', fullPage: true });
-  pass('30 actual UI swaps, animations and server-computed challenge score complete and rank');
+  expect(stepRequests).toBe(0); pass('30 local UI swaps finish with zero per-step requests; one completed action log produces the cloud score');
   await mobile.locator('#online-rankings').click(); await mobile.locator('[data-ranking="challenge"]').click();
   await expect(mobile.locator('.challenge-table')).toContainText(name);
   await mobile.screenshot({ path: 'test-results/public/mobile.png', fullPage: true });
@@ -72,7 +75,7 @@ try {
   pass('public restart returns to selectable difficulty and hero setup');
 } catch (error) { failure = error; console.error(error); }
 finally {
-  await writeFile('test-results/public/report.json', JSON.stringify({ passed: checks.length, checks, errors, playerIds: ids, failure: failure?.stack }, null, 2));
+  await writeFile('test-results/public/report.json', JSON.stringify({ passed: checks.length, checks, stepRequests, errors, playerIds: ids, failure: failure?.stack }, null, 2));
   if (ids.length && ids.every(id => /^[a-f0-9-]{36}$/.test(id))) {
     const list = ids.map(id => `'${id}'`).join(',');
     await writeFile('test-results/public/cleanup.sql', `DELETE FROM records WHERE player_id IN (${list});\nDELETE FROM runs WHERE player_id IN (${list});\nDELETE FROM players WHERE id IN (${list});\n`);

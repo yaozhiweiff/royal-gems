@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { handleApi } from '../backend/api';
 import { sqliteDatabase } from '../backend/sqlite.mjs';
 import { findMove } from '../src/engine';
+import { LocalRun } from '../src/local-run';
 const origin = 'https://example.github.io';
 function fixture() {
   const db = sqliteDatabase(':memory:'); db.exec(readFileSync('backend/migrations/0001_online.sql', 'utf8'));
@@ -12,6 +13,50 @@ function fixture() {
   }; return { db, call };
 }
 describe('online identity and authoritative leaderboards', () => {
+  it('plays a complete challenge locally, then submits its action log once with idempotent ranking', async () => {
+    const { db, call } = fixture(); await call('/register', undefined, { name: '本地即时' });
+    const started = (await call('/runs', undefined, { mode: 'challenge', character: 'ian' })).data;
+    const run = new LocalRun(started.runId, started.seed, 'challenge', 'ian');
+    expect(run.matches(started.state)).toBe(true);
+    for (let i = 0; i < 30; i++) { const pair = findMove(run.game.state.board)!; expect(run.move(...pair).frames.length).toBeGreaterThan(0); }
+    expect((await call('/leaderboards?mode=challenge')).data.entries).toHaveLength(0);
+    const report = run.completion();
+    const result = await call(`/runs/${report.runId}/complete`, undefined, { actions: report.actions, score: 999999999, character: 'beth' });
+    expect(result.status).toBe(200); expect(result.data.state).toEqual(run.game.snapshot());
+    expect(result.data.bests.challenge).toBe(run.game.state.score);
+    expect((await call(`/runs/${report.runId}/complete`, undefined, { actions: report.actions })).data).toEqual(result.data);
+    const entries = (await call('/leaderboards?mode=challenge')).data.entries;
+    expect(entries).toHaveLength(1); expect(entries[0]).toMatchObject({ value: run.game.state.score, character: 'ian' });
+    expect((await call(`/runs/${report.runId}/complete`, undefined, { actions: report.actions.slice(1) })).status).toBe(409);
+    db.close();
+  });
+  it('rejects incomplete, invalid, out-of-bounds, extra and foreign completion logs', async () => {
+    const { db, call } = fixture(); await call('/register', undefined, { name: '整局提交' }); await call('/register', 'b'.repeat(64), { name: '另一玩家' });
+    const started = (await call('/runs', undefined, { mode: 'challenge', character: 'beth' })).data;
+    const run = new LocalRun(started.runId, started.seed, 'challenge', 'beth'), path = `/runs/${started.runId}/complete`;
+    const pair = findMove(run.game.state.board)!; run.move(...pair);
+    expect((await call(path, undefined, { actions: [pair] })).status).toBe(400);
+    expect((await call(path, undefined, { actions: [[0, 55]] })).status).toBe(400);
+    expect((await call(path, undefined, { actions: [[-1, 0]] })).status).toBe(400);
+    expect((await call(path, undefined, { actions: Array(501).fill(pair) })).status).toBe(400);
+    expect((await call(path, 'b'.repeat(64), { actions: [pair] })).status).toBe(404);
+    while (run.game.state.status === 'playing') run.move(...findMove(run.game.state.board)!);
+    const report = run.completion();
+    expect((await call(path, undefined, { actions: [...report.actions, pair] })).status).toBe(400);
+    expect((await call('/leaderboards?mode=challenge')).data.entries).toHaveLength(0);
+    db.close();
+  });
+  it('submits successful easy-mode local play using actual moves, including turn-granting skills', async () => {
+    const { db, call } = fixture(); await call('/register', undefined, { name: '回合排行' });
+    const started = (await call('/runs', undefined, { mode: 'easy', character: 'ian' })).data;
+    await db.prepare('UPDATE runs SET seed = ? WHERE id = ?').bind(26, started.runId).run();
+    const run = new LocalRun(started.runId, 26, 'easy', 'ian');
+    while (run.game.state.status === 'playing') run.move(...findMove(run.game.state.board)!);
+    expect(run.game.state.status).toBe('won'); expect(run.game.state.moves).toBe(26);
+    const result = await call(`/runs/${started.runId}/complete`, undefined, run.completion());
+    expect(result.status).toBe(200); expect(result.data.bests.easy).toBe(26);
+    db.close();
+  });
   it('requires a name, canonicalizes duplicates and binds one account to one device', async () => {
     const { db, call } = fixture();
     expect((await call('/account')).data.player).toBeNull();

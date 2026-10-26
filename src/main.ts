@@ -30,9 +30,10 @@ let character = Math.max(0, CHARACTERS.findIndex(c => c.id === stored('royal-cha
 const selectedCharacterId = () => CHARACTERS[character].id as CharacterId;
 let engine = new GameEngine('easy', Math.random, selectedCharacterId());
 let onlinePlayer: online.Player | null = null, accountLoading = true;
-let pendingBests: online.Player['bests'] | undefined;
 let displayed = engine.snapshot();
 let busy = false, loaded = false, loadFailed = false;
+let lastAction: [number, number] | null = null;
+let actionSerial = 0;
 let frameKind: Frame['kind'] | 'idle' = 'idle';
 let activeCombination: Frame['combination'] | null = null;
 let sound = stored('royal-sound', 'on') === 'on';
@@ -101,7 +102,7 @@ async function initializeAccount() {
   accountLoading = true; updateControls();
   try {
     onlinePlayer = (await online.account()).player;
-    if (onlinePlayer) { $('#player-name').textContent = `玩家：${onlinePlayer.name}`; $('#modal-close').hidden = false; if (modal.open) closeModal(); updateHUD(engine.snapshot()); void refreshRankingStatus(); }
+    if (onlinePlayer) { $('#player-name').textContent = `玩家：${onlinePlayer.name}`; $('#modal-close').hidden = false; if (modal.open) closeModal(); updateHUD(engine.snapshot()); void refreshRankingStatus(); void online.retryPendingResults().then(applyBests); }
     else showRegistration();
   } catch (error) {
     openModal(`<h2 id="modal-title">连接游戏服务</h2><p class="modal-intro" id="account-error"></p><button id="account-retry" class="primary-button full">重新连接</button>`);
@@ -261,11 +262,12 @@ function showClearFeedback(frame: Frame, tier: number, count: number) {
 function syncSound() { $('#sound').innerHTML = icon(sound ? 'sound' : 'mute'); $('#sound').setAttribute('aria-label', sound ? '关闭音效' : '开启音效'); $('#sound').setAttribute('aria-pressed', String(sound)); }
 async function move(a: number, b: number) {
   if (busy || modal.open || engine.state.status !== 'playing' || !onlinePlayer) return;
+  if (import.meta.env.DEV) { lastAction = [a, b]; actionSerial++; }
   busy = true; updateControls(); tone('move');
   let previous = displayed;
   try {
-    const result = await online.moveRun(a, b);
-    const frames = result.frames; engine.state = result.state; pendingBests = result.bests;
+    const result = online.moveRun(a, b);
+    const frames = result.frames; engine.state = result.state;
     for (const frame of frames) {
       frameKind = frame.kind;
       activeCombination = frame.combination ?? null;
@@ -313,7 +315,7 @@ async function startGame() {
   busy = true; updateControls();
   try {
     engine.state = await online.startRun(engine.state.difficulty, selectedCharacterId());
-    pendingBests = undefined; scene.clearEffects(); await scene.renderState(engine.snapshot()); updateHUD(engine.snapshot());
+    scene.clearEffects(); await scene.renderState(engine.snapshot()); updateHUD(engine.snapshot());
     $('#board-message').textContent = '交换相邻宝石，开启第一步'; tone('move');
   } catch (error) { toast((error as Error).message); }
   finally { busy = false; updateControls(); }
@@ -388,19 +390,43 @@ function confirmRestart() {
   openModal(`<span class="eyebrow">A FRESH START</span><h2 id="modal-title">返回选择界面？</h2><p class="modal-intro">本局进度将重置，返回后可以重新选择难度和英雄。</p><div class="modal-actions"><button id="keep-playing" class="secondary-button">继续本局</button><button id="confirm-restart" class="primary-button">返回选择 ${icon('replay')}</button></div>`);
   $('#keep-playing').onclick = closeModal; $('#confirm-restart').onclick = () => reset();
 }
+function applyBests(bests: online.Player['bests'] | undefined) {
+  if (!onlinePlayer || !bests) return;
+  for (const mode of ['easy', 'hard', 'challenge'] as const) {
+    const value = bests[mode], previous = onlinePlayer.bests[mode];
+    if (value && Number.isSafeInteger(value)) onlinePlayer.bests[mode] = previous ? (mode === 'challenge' ? Math.max(previous, value) : Math.min(previous, value)) : value;
+  }
+  updateHUD(displayed); void refreshRankingStatus();
+  const sync = document.querySelector('#result-sync'), retry = document.querySelector<HTMLButtonElement>('#result-submit-retry');
+  if (sync && !online.hasPendingResult()) { sync.textContent = '成绩已提交'; if (retry) retry.hidden = true; }
+  const tab = document.querySelector<HTMLButtonElement>('[data-ranking][aria-pressed="true"]');
+  if (tab && !busy) void showRankings(tab.dataset.ranking as Difficulty);
+}
+function submitFinishedResult() {
+  const status = document.createElement('p'), retry = document.createElement('button');
+  status.id = 'result-sync'; status.className = 'motion-hint'; status.setAttribute('role', 'status');
+  retry.id = 'result-submit-retry'; retry.className = 'secondary-button full'; retry.textContent = '重试提交成绩'; retry.hidden = true;
+  $('#modal-content').append(status, retry);
+  const submit = async () => {
+    retry.hidden = true; status.textContent = '正在提交本局成绩…';
+    try { applyBests(await online.completeRun()); if (status.isConnected) status.textContent = '成绩已提交'; }
+    catch { if (status.isConnected) { status.textContent = '成绩暂未提交，请恢复网络后重试。'; retry.hidden = false; } }
+  };
+  retry.onclick = () => void submit(); void submit();
+}
+window.addEventListener('online', () => { if (onlinePlayer) void online.retryPendingResults().then(applyBests); });
 function finish() {
   const s = engine.state, won = s.status === 'won', previousBest = best();
   const previousTurns = bestTurns(), newTurnRecord = won && (!previousTurns || s.moves < previousTurns);
-  if (onlinePlayer && pendingBests) onlinePlayer.bests = pendingBests;
-  pendingBests = undefined;
   updateHUD(s); tone(won || s.status === 'completed' ? 'win' : 'invalid');
   void refreshRankingStatus();
   if (s.difficulty === 'challenge') {
     const difference = s.score - previousBest;
-    $('#board-message').textContent = '30回合挑战完成，成绩已提交联网排行榜';
+    $('#board-message').textContent = '30回合挑战完成';
     openModal(`<div class="result-seal">${icon('crown')}</div><span class="eyebrow">THE SCORE CHALLENGE</span><h2 id="modal-title">挑战完成</h2><div class="result-score">${s.score.toLocaleString('en-US')}<small>本次积分${difference > 0 ? ' · 新的个人最佳' : ''}</small></div><p class="modal-intro">此前最佳：${previousBest.toLocaleString('en-US')} 分 · ${difference > 0 ? `超出 ${difference.toLocaleString('en-US')} 分` : difference < 0 ? `相差 ${Math.abs(difference).toLocaleString('en-US')} 分` : '追平最佳成绩'}</p><button id="result-rankings" class="secondary-button full">查看联网排行榜</button><div class="modal-actions"><button id="result-back" class="secondary-button">返回准备</button><button id="result-replay" class="primary-button">再次挑战 ${icon('arrow')}</button></div>`);
     $('#result-rankings').onclick = () => void showRankings('challenge');
     $('#result-back').onclick = () => reset(); $('#result-replay').onclick = () => reset('challenge', true);
+    submitFinishedResult();
     return;
   }
   $('#board-message').textContent = won ? '目标达成，王室试炼完成' : '本次回合已用尽，再试一次吧';
@@ -408,6 +434,7 @@ function finish() {
   openModal(`<div class="result-seal">${icon(won ? 'crown' : 'spark')}</div><span class="eyebrow">${won ? 'A ROYAL ACHIEVEMENT' : 'EVERY MOVE, A NEW POSSIBILITY'}</span><h2 id="modal-title">${won ? '试炼完成' : '再赴一场试炼'}</h2><p class="modal-intro">${won ? comparison : '回合已用尽，巧用特殊宝石与角色技能，再试一次。'}</p><div class="result-score">${won ? s.moves : s.score.toLocaleString('en-US')}<small>${won ? `通关所用回合${newTurnRecord ? ' · 新的最少回合记录' : ''}` : '本局积分'}</small></div><div class="result-details"><span>${LEVELS[s.difficulty].name}难度</span><span>积分 ${s.score.toLocaleString('en-US')}</span><span>本次 ${s.moves} 回合</span></div><div class="modal-actions"><button id="result-back" class="secondary-button">返回准备</button><button id="result-replay" class="primary-button">再来一局 ${icon('arrow')}</button></div>`);
   const rankingButton = document.createElement('button'); rankingButton.id = 'result-rankings'; rankingButton.className = 'secondary-button full'; rankingButton.textContent = '查看联网排行榜'; rankingButton.onclick = () => void showRankings(s.difficulty); $('#modal-content').append(rankingButton);
   $('#result-back').onclick = () => reset(); $('#result-replay').onclick = () => reset(s.difficulty, true);
+  if (won) submitFinishedResult();
 }
 
 document.querySelectorAll<HTMLButtonElement>('[data-character]').forEach(button => button.onclick = () => { if (busy || engine.state.status !== 'ready') return; character = Number(button.dataset.character); engine.state.character = selectedCharacterId(); updateCharacter(); updateHUD(engine.snapshot()); tone('move'); });
@@ -446,5 +473,6 @@ if (import.meta.env.DEV) {
     newTile: (color: number, special = 'normal') => engine.tile(color, special as 'normal'),
     assets: GEMS,
     layout: () => scene.getBoardLayout(),
+    input: () => ({ pair: lastAction, serial: actionSerial, ...scene.getInputStats() }),
   } });
 }

@@ -38,19 +38,19 @@ try {
     return { x: b.x + (12 + (index % 8 + .5) * 90 + (badge ? 28 : 0)) / layout.width * b.width, y: b.y + (12 + (Math.floor(index / 8) + .5) * layout.rowHeight + (badge ? 28 : 0)) / layout.height * b.height };
   }
   async function swipe(a, b) {
-    const start = await point(a), end = await point(b), response = page.waitForResponse(r => /\/api\/runs\/.+\/move$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST');
+    const start = await point(a), end = await point(b), serial = await page.evaluate(() => window.__royalGems.input().serial);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, id: 1 }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...end, id: 1 }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    const r = await response; expect(r.status()).toBe(200); expect(r.request().postDataJSON()).toMatchObject({ a, b });
-    return r.json();
+    await expect.poll(() => page.evaluate(() => window.__royalGems.input().serial)).toBe(serial + 1);
+    expect(await page.evaluate(() => window.__royalGems.input().pair)).toEqual([a, b]);
   }
   for (const pair of [[55, 54], [0, 8]]) { await swipe(...pair); await expect(page.locator('#hint')).toBeEnabled({ timeout: 60000 }); }
   const pair = await page.evaluate(() => window.__royalGems.hint()); await swipe(...pair);
   await expect(page.locator('#hint')).toBeEnabled({ timeout: 60000 });
   expect(await page.evaluate(() => window.__royalGems.state().moves)).toBeGreaterThan(0);
   await page.screenshot({ path: `${output}/playing-390.png`, fullPage: true });
-  pass('touch swipes hit the bottom-right and top-left cells and resolve actual server-backed matches');
+  pass('touch swipes hit the bottom-right and top-left cells and resolve local matches');
   const original = await page.evaluate(() => window.__royalGems.state());
   await page.evaluate(() => { const s = window.__royalGems.state(); s.board[55].special = 'ultimate'; window.__royalGems.load(s); });
   const badge = await point(55, true); await page.touchscreen.tap(badge.x, badge.y);
