@@ -47,6 +47,8 @@ try {
   await expect(p.locator('#modal-title')).toHaveText('挑战完成', { timeout: 60000 });
   expect(state.status).toBe('completed');
   await p.locator('#result-rankings').click();
+  await expect(p.locator('#ranking-status')).toContainText('当前第');
+  await expect(p.locator('#ranking-personal')).toContainText('当前第');
   await expect(p.locator('.challenge-table')).toContainText(name);
   await expect(p.locator('.challenge-table')).toContainText('兰斯');
   await expect(p.locator('.challenge-table')).toContainText(state.score.toLocaleString('en-US'));
@@ -62,6 +64,12 @@ try {
   await expect(p.locator('#player-name')).toContainText(name); await expect(p.locator('#start')).toBeEnabled();
   await p.locator('[data-difficulty="challenge"]').click(); await expect(p.locator('#best-score')).toHaveText(state.score.toLocaleString('en-US'));
   expect(errors).toEqual([]); pass('refresh restores account and cloud best; no runtime errors');
+  await p.locator('#start').click(); await expect(p.locator('#hint')).toBeEnabled();
+  await p.locator('#restart').click(); await p.locator('#confirm-restart').click();
+  await expect(p.locator('#setup-actions')).toBeVisible(); await expect(p.locator('#play-actions')).toBeHidden();
+  await p.locator('[data-difficulty="hard"]').click(); await p.locator('[data-character="3"]').click();
+  await expect(p.locator('[data-character="3"]')).toHaveAttribute('aria-pressed', 'true');
+  pass('public restart returns to selectable difficulty and hero setup');
 } catch (error) { failure = error; console.error(error); }
 finally {
   await writeFile('test-results/public/report.json', JSON.stringify({ passed: checks.length, checks, errors, playerIds: ids, failure: failure?.stack }, null, 2));

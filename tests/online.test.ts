@@ -69,4 +69,35 @@ describe('online identity and authoritative leaderboards', () => {
     expect((await call('/account', undefined, undefined, 'https://evil.test')).status).toBe(403);
     db.close();
   });
+  it('reports the full personal rank and gap beyond the top ten, including ties and first place', async () => {
+    const { db, call } = fixture();
+    const player = (await call('/register', undefined, { name: '榜外玩家' })).data.player;
+    for (let i = 0; i < 11; i++) {
+      const id = `rank${i}`;
+      await db.prepare('INSERT INTO players VALUES(?,?,?,?,?)').bind(id, `排行玩家${i}`, `rankkey${i}`, `rankhash${i}`, i).run();
+      for (const mode of ['easy', 'hard', 'challenge']) await db.prepare('INSERT INTO records VALUES(?,?,?,?,?)').bind(id, mode, 'beth', mode === 'challenge' ? (12 - i) * 100 : (i + 1) * 2, i).run();
+    }
+    for (const mode of ['easy', 'hard', 'challenge']) {
+      expect((await call(`/leaderboards?mode=${mode}`)).data.self).toBeNull();
+      await db.prepare('INSERT INTO records VALUES(?,?,?,?,?)').bind(player.id, mode, 'lance', mode === 'challenge' ? 100 : 24, 100).run();
+      const result = (await call(`/leaderboards?mode=${mode}`)).data;
+      expect(result.entries).toHaveLength(10); expect(result.entries.some((r: any) => r.playerId === player.id)).toBe(false);
+      expect(result.self).toEqual({ rank: 12, value: mode === 'challenge' ? 100 : 24, gap: mode === 'challenge' ? 100 : 2 });
+      await db.prepare('UPDATE records SET value = ? WHERE player_id = ? AND mode = ?').bind(mode === 'challenge' ? 200 : 22, player.id, mode).run();
+      expect((await call(`/leaderboards?mode=${mode}`)).data.self).toMatchObject({ rank: 12, gap: 0 });
+      await db.prepare('UPDATE records SET value = ? WHERE player_id = ? AND mode = ?').bind(mode === 'challenge' ? 2000 : 1, player.id, mode).run();
+      expect((await call(`/leaderboards?mode=${mode}`)).data.self).toMatchObject({ rank: 1, gap: null });
+    }
+    db.close();
+  });
+  it('keeps personal ranking private while serving public top ten without a credential', async () => {
+    const { db, call } = fixture();
+    const player = (await call('/register', undefined, { name: '个人排行' })).data.player;
+    await db.prepare('INSERT INTO records VALUES(?,?,?,?,?)').bind(player.id, 'easy', 'beth', 7, 1).run();
+    const response = await handleApi(new Request('https://game.test/api/leaderboards?mode=easy'), db, origin);
+    const result = await response.json() as any;
+    expect(response.status).toBe(200); expect(result.entries).toHaveLength(1); expect(result.self).toBeNull();
+    expect((await call('/leaderboards?mode=hard')).data.self).toBeNull();
+    db.close();
+  });
 });

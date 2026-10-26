@@ -53,7 +53,17 @@ async function route(request: Request, db: Database): Promise<Response> {
     const mode = url.searchParams.get('mode'); if (!modes.includes(mode ?? '')) fail(400, 'INVALID_MODE', '模式不存在');
     const direction = mode === 'challenge' ? 'DESC' : 'ASC';
     const { results } = await db.prepare(`SELECT p.id AS playerId, p.name, r.character, r.value, r.achieved_at AS achievedAt FROM records r JOIN players p ON p.id = r.player_id WHERE r.mode = ? ORDER BY r.value ${direction}, r.achieved_at ASC, p.id ASC LIMIT 10`).bind(mode).all();
-    return json({ mode, entries: results });
+    let self = null;
+    if (request.headers.has('authorization')) {
+      const hash = await deviceHash(request);
+      const viewer = await db.prepare('SELECT id FROM players WHERE device_hash = ?').bind(hash).first<{ id: string }>();
+      if (viewer) {
+        // Rank over the entire mode, then select the viewer, including players outside the top ten.
+        const record = await db.prepare(`WITH ranked AS (SELECT r.player_id, r.value, ROW_NUMBER() OVER (ORDER BY r.value ${direction}, r.achieved_at ASC, r.player_id ASC) AS rank, LAG(r.value) OVER (ORDER BY r.value ${direction}, r.achieved_at ASC, r.player_id ASC) AS previousValue FROM records r WHERE r.mode = ?) SELECT rank, value, previousValue FROM ranked WHERE player_id = ?`).bind(mode, viewer.id).first<{ rank: number; value: number; previousValue: number | null }>();
+        if (record) self = { rank: record.rank, value: record.value, gap: record.previousValue === null ? null : Math.abs(record.value - record.previousValue) };
+      }
+    }
+    return json({ mode, entries: results, self });
   }
   const hash = await deviceHash(request);
   const player = await db.prepare('SELECT id, name FROM players WHERE device_hash = ?').bind(hash).first<Player>();

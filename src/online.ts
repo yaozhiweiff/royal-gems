@@ -2,6 +2,7 @@ import type { State, Difficulty, Frame } from './engine';
 import type { CharacterId } from './skills';
 export type Player = { id: string; name: string; bests: Partial<Record<Difficulty, number>> };
 export type Ranking = { playerId: string; name: string; character: CharacterId; value: number; achievedAt: number };
+export type PersonalRank = { rank: number; value: number; gap: number | null };
 const origin = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 let credential: Promise<string> | null = null;
 export class OnlineError extends Error { constructor(public code: string, message: string) { super(message); } }
@@ -38,7 +39,7 @@ async function request<T>(path: string, data?: unknown, nonceRetry = false): Pro
 }
 export const account = () => request<{ player: Player | null }>('/account');
 export const register = (name: string) => request<{ player: Player }>('/register', { name });
-export const rankings = (mode: Difficulty) => request<{ entries: Ranking[] }>(`/leaderboards?mode=${mode}`);
+export const rankings = (mode: Difficulty) => request<{ entries: Ranking[]; self: PersonalRank | null }>(`/leaderboards?mode=${mode}`);
 let runId = '', revision = 0;
 export async function startRun(mode: Difficulty, character: CharacterId) {
   const result = await request<{ runId: string; revision: number; state: State }>('/runs', { mode, character });

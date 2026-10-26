@@ -74,7 +74,7 @@ $('#app').innerHTML = `
       <div class="board-frame"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><div id="board-canvas"></div><div id="board-loading">正在布置宝石…</div><div id="combo" aria-live="polite"></div></div>
       <div class="board-message"><span class="status-dot"></span><span id="board-message">准备就绪，开启你的宫廷试炼</span></div>
       <div id="setup-actions" class="setup-actions"><div class="difficulty-control" role="group" aria-label="选择模式"><button data-difficulty="easy" aria-pressed="true">简单</button><button data-difficulty="hard" aria-pressed="false">困难</button><button data-difficulty="challenge" aria-pressed="false">挑战</button></div><button id="start" class="primary-button" disabled><span>开始挑战</span>${icon('arrow')}</button></div>
-      <button id="online-rankings" class="text-button challenge-records">${icon('crown')} 联网排行榜</button>
+      <div class="rankings-bar"><button id="online-rankings" class="text-button">${icon('crown')} 联网排行榜</button><span id="ranking-status" class="ranking-status" role="status" title="按当前模式已提交的个人最佳成绩排名">登记名字后查看排名</span></div>
       <div id="play-actions" class="play-actions" hidden><span class="play-tip">交换相邻宝石 · 双击特殊宝石查看效果</span><div><button id="hint" class="text-button">${icon('spark')} 提示</button><button id="restart" class="text-button">${icon('replay')} 重来</button></div></div>
     </section>
   </main>
@@ -101,7 +101,7 @@ async function initializeAccount() {
   accountLoading = true; updateControls();
   try {
     onlinePlayer = (await online.account()).player;
-    if (onlinePlayer) { $('#player-name').textContent = `玩家：${onlinePlayer.name}`; $('#modal-close').hidden = false; if (modal.open) closeModal(); updateHUD(engine.snapshot()); }
+    if (onlinePlayer) { $('#player-name').textContent = `玩家：${onlinePlayer.name}`; $('#modal-close').hidden = false; if (modal.open) closeModal(); updateHUD(engine.snapshot()); void refreshRankingStatus(); }
     else showRegistration();
   } catch (error) {
     openModal(`<h2 id="modal-title">连接游戏服务</h2><p class="modal-intro" id="account-error"></p><button id="account-retry" class="primary-button full">重新连接</button>`);
@@ -114,10 +114,34 @@ function showRegistration() {
   $('#modal-close').hidden = true;
   $('#register-form').onsubmit = async event => {
     event.preventDefault(); $<HTMLButtonElement>('#register-submit').disabled = true;
-    try { onlinePlayer = (await online.register($<HTMLInputElement>('#register-name').value)).player; $('#modal-close').hidden = false; closeModal(); $('#player-name').textContent = `玩家：${onlinePlayer.name}`; updateHUD(engine.snapshot()); updateControls(); }
+    try { onlinePlayer = (await online.register($<HTMLInputElement>('#register-name').value)).player; $('#modal-close').hidden = false; closeModal(); $('#player-name').textContent = `玩家：${onlinePlayer.name}`; updateHUD(engine.snapshot()); updateControls(); void refreshRankingStatus(); }
     catch (error) { if (error instanceof online.OnlineError && error.code === 'DEVICE_REGISTERED') { await initializeAccount(); return; } $('#register-error').textContent = (error as Error).message; $<HTMLButtonElement>('#register-submit').disabled = false; }
   };
   $<HTMLInputElement>('#register-name').focus();
+}
+const rankingRequests: Record<Difficulty, number> = { easy: 0, hard: 0, challenge: 0 };
+function rankDescription(self: online.PersonalRank | null, mode: Difficulty) {
+  if (!self) return mode === 'challenge' ? '当前未上榜 · 完成30回合后参与排名' : '当前未上榜 · 通关后参与排名';
+  if (self.rank === 1) return '当前第 1 名 · 已位居榜首';
+  if (self.gap === 0) return `当前第 ${self.rank.toLocaleString('en-US')} 名 · 与上一名${mode === 'challenge' ? '同分' : '回合相同'}，先达成者优先`;
+  return `当前第 ${self.rank.toLocaleString('en-US')} 名 · 距上一名 ${self.gap!.toLocaleString('en-US')} ${mode === 'challenge' ? '分' : '回合'}`;
+}
+async function loadRankings(mode: Difficulty) {
+  const request = ++rankingRequests[mode];
+  const current = () => request === rankingRequests[mode] && mode === engine.state.difficulty;
+  if (current()) $('#ranking-status').textContent = '正在读取当前排名…';
+  try {
+    const result = await online.rankings(mode);
+    if (current()) $('#ranking-status').textContent = rankDescription(result.self, mode);
+    return result;
+  } catch (error) {
+    if (current()) $('#ranking-status').textContent = '排名暂不可用 · 点击排行榜重试';
+    throw error;
+  }
+}
+async function refreshRankingStatus() {
+  if (!onlinePlayer) return;
+  try { await loadRankings(engine.state.difficulty); } catch { /* The status provides a retry through the leaderboard button. */ }
 }
 async function showRankings(mode = engine.state.difficulty) {
   if (busy || !onlinePlayer) return;
@@ -125,8 +149,9 @@ async function showRankings(mode = engine.state.difficulty) {
   document.querySelectorAll<HTMLButtonElement>('[data-ranking]').forEach(b => b.onclick = () => void showRankings(b.dataset.ranking as Difficulty));
   const container = $('#ranking-body');
   try {
-    const { entries } = await online.rankings(mode); if (!container.isConnected) return;
+    const { entries, self } = await loadRankings(mode); if (!container.isConnected) return;
     container.innerHTML = entries.length ? `<table class="challenge-table"><thead><tr><th>排名</th><th>玩家名字</th><th>角色</th><th>成绩</th></tr></thead><tbody>${entries.map((r, i) => `<tr class="${r.playerId === onlinePlayer?.id ? 'current-record' : ''}"><td>${i + 1}</td><td class="ranking-name">${escapeText(r.name)}</td><td>${CHARACTERS.find(c => c.id === r.character)?.name ?? '未知'}</td><td>${r.value.toLocaleString('en-US')} ${mode === 'challenge' ? '分' : '回合'}</td></tr>`).join('')}</tbody></table>` : '<p class="motion-hint">还没有有效成绩，来争夺第一名吧。</p>';
+    const personal = document.createElement('p'); personal.className = 'ranking-personal'; personal.id = 'ranking-personal'; personal.textContent = rankDescription(self, mode); container.prepend(personal);
   } catch (error) { if (container.isConnected) { container.textContent = (error as Error).message; const retry = document.createElement('button'); retry.className = 'secondary-button'; retry.textContent = '重试'; retry.onclick = () => void showRankings(mode); container.append(retry); } }
 }
 function updateCharacter() {
@@ -279,6 +304,7 @@ function reset(difficulty = engine.state.difficulty, start = false) {
   updateHUD(engine.snapshot()); updateControls();
   document.querySelectorAll<HTMLButtonElement>('[data-difficulty]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.difficulty === difficulty)));
   $('#board-message').textContent = difficulty === 'challenge' ? '固定30回合，挑战更高积分；完成后参与联网排行' : start ? '交换相邻宝石，开启第一步' : '准备就绪，开启你的宫廷试炼';
+  void refreshRankingStatus();
   if (start) void startGame();
 }
 async function startGame() {
@@ -358,8 +384,8 @@ function showRules(section = '') {
   $('#rules-done').onclick = closeModal;
 }
 function confirmRestart() {
-  openModal(`<span class="eyebrow">A FRESH START</span><h2 id="modal-title">重新开始试炼？</h2><p class="modal-intro">本局进度将重置，保留当前角色与难度。</p><div class="modal-actions"><button id="keep-playing" class="secondary-button">继续本局</button><button id="confirm-restart" class="primary-button">重新开始 ${icon('replay')}</button></div>`);
-  $('#keep-playing').onclick = closeModal; $('#confirm-restart').onclick = () => reset(engine.state.difficulty, true);
+  openModal(`<span class="eyebrow">A FRESH START</span><h2 id="modal-title">返回选择界面？</h2><p class="modal-intro">本局进度将重置，返回后可以重新选择难度和英雄。</p><div class="modal-actions"><button id="keep-playing" class="secondary-button">继续本局</button><button id="confirm-restart" class="primary-button">返回选择 ${icon('replay')}</button></div>`);
+  $('#keep-playing').onclick = closeModal; $('#confirm-restart').onclick = () => reset();
 }
 function finish() {
   const s = engine.state, won = s.status === 'won', previousBest = best();
@@ -367,6 +393,7 @@ function finish() {
   if (onlinePlayer && pendingBests) onlinePlayer.bests = pendingBests;
   pendingBests = undefined;
   updateHUD(s); tone(won || s.status === 'completed' ? 'win' : 'invalid');
+  void refreshRankingStatus();
   if (s.difficulty === 'challenge') {
     const difference = s.score - previousBest;
     $('#board-message').textContent = '30回合挑战完成，成绩已提交联网排行榜';

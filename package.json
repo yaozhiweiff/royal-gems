@@ -18,7 +18,8 @@
     "test:challenge": "node scripts/challenge-playtest.mjs",
     "test:best-turns": "node scripts/best-turns-playtest.mjs",
     "test:online": "node scripts/online-playtest.mjs",
-    "test:public": "node scripts/public-playtest.mjs"
+    "test:public": "node scripts/public-playtest.mjs",
+    "test:ranking-restart": "node scripts/ranking-restart-playtest.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"
