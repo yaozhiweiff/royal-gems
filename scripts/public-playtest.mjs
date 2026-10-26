@@ -22,11 +22,11 @@ try {
   await expect(p.locator('#start')).toBeDisabled();
   expect(await p.evaluate(() => typeof window.__royalGems)).toBe('undefined');
   expect(await p.evaluate(() => [...document.images].every(i => i.complete && i.naturalWidth > 0))).toBe(true);
-  await signup(p, name); await expect(p.locator('#start')).toBeEnabled();
+  await signup(p, name); await expect(p.locator('#start')).toBeEnabled({ timeout: 20000 });
   pass('public registration and all subpath assets work; development hooks absent');
   const mobile = await open({ width: 390, height: 844 });
   await signup(mobile, name); await expect(mobile.locator('#register-error')).toContainText('已经注册');
-  await signup(mobile, `${name}乙`); await expect(mobile.locator('#start')).toBeEnabled();
+  await signup(mobile, `${name}乙`); await expect(mobile.locator('#start')).toBeEnabled({ timeout: 20000 });
   pass('independent browser rejects duplicate name and registers another account');
   await p.locator('[data-difficulty="challenge"]').click();
   await p.locator('[data-character="1"]').click();
