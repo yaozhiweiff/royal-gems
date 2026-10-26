@@ -3,16 +3,20 @@ import { COLS, ROWS, type Board, type State, type Frame, type Tile } from './eng
 import { GEMS, assetUrl } from './assets';
 import { ClearEffects, getClearTier } from './clear-effects';
 import { animationTimings, paceDuration, type AnimationSpeed, type MotionMode } from './motion';
+import { BoardLayout, CELL_SIZE as SIZE, BOARD_PAD as PAD, BOARD_WIDTH, DESKTOP_HEIGHT } from './board-layout';
 
-const SIZE = 90, PAD = 12;
 const INSPECT_X = 28, INSPECT_Y = 28, INSPECT_HIT_RADIUS = 16;
 const DOUBLE_TAP_MS = 280;
-export const CANVAS_WIDTH = COLS * SIZE + PAD * 2;
-export const CANVAS_HEIGHT = ROWS * SIZE + PAD * 2;
-const center = (i: number) => ({ x: PAD + (i % COLS + .5) * SIZE, y: PAD + (Math.floor(i / COLS) + .5) * SIZE });
+export const CANVAS_WIDTH = BOARD_WIDTH;
+export const CANVAS_HEIGHT = DESKTOP_HEIGHT;
 type GemView = Phaser.GameObjects.Container & { gemKind?: string };
 
 export class BoardScene extends Phaser.Scene {
+  private layout = new BoardLayout();
+  private wantedSquare = false;
+  private layoutBusy = false;
+  private cells!: Phaser.GameObjects.Graphics;
+  private latest: State;
   private views = new Map<number, GemView>();
   private selected: number | null = null;
   private down: { cell: number; x: number; y: number; inspect: boolean } | null = null;
@@ -38,7 +42,37 @@ export class BoardScene extends Phaser.Scene {
 
   constructor(initial: State, onMove: (a: number, b: number) => void, onReady: () => void, onLoadError: () => void, onInspect: (tile: Tile) => void, onClear: (frame: Frame, tier: number, count: number) => void) {
     super('board'); this.initial = initial; this.board = initial.board; this.onMove = onMove; this.onReady = onReady; this.onLoadError = onLoadError; this.onInspect = onInspect;
-    this.onClear = onClear;
+    this.onClear = onClear; this.latest = initial;
+  }
+  getBoardLayout() { return { width: this.layout.width, height: this.layout.height, rowHeight: this.layout.rowHeight }; }
+  setLayoutBusy(busy: boolean) { this.layoutBusy = busy; if (!busy) this.setSquareLayout(this.wantedSquare); }
+  setSquareLayout(square: boolean) {
+    this.wantedSquare = square;
+    if (this.layoutBusy) { this.syncCanvasAspect(); return; }
+    if (this.layout.square === square) return;
+    this.layout.square = square;
+    this.syncCanvasAspect();
+    if (!this.ready) return;
+    this.clearHints(); this.clearEffects(); this.select(null);
+    this.scale.resize(this.layout.width, this.layout.height);
+    this.cameras.main.setSize(this.layout.width, this.layout.height);
+    this.drawCells(); void this.renderState(this.latest);
+  }
+  private syncCanvasAspect() {
+    const parent = document.getElementById('board-canvas');
+    if (parent) parent.style.aspectRatio = `${this.layout.width} / ${this.layout.height}`;
+  }
+  private drawCells() {
+    const cells = this.cells.clear(), height = this.layout.rowHeight;
+    for (let i = 0; i < COLS * ROWS; i++) {
+      const { x, y } = this.layout.center(i);
+      cells.fillStyle((Math.floor(i / COLS) + i % COLS) % 2 ? 0x23382e : 0x2a4035, .94);
+      cells.fillRoundedRect(x - SIZE / 2 + 3, y - height / 2 + 3, SIZE - 6, height - 6, 9);
+      cells.lineStyle(1, 0xd5be7b, .12);
+      cells.strokeRoundedRect(x - SIZE / 2 + 3, y - height / 2 + 3, SIZE - 6, height - 6, 9);
+      cells.fillStyle(0xffffff, .035);
+      cells.fillRoundedRect(x - SIZE / 2 + 4, y - height / 2 + 4, SIZE - 8, 20, 8);
+    }
   }
   get reducedMotion() { return this.motionMode === 'gentle'; }
   setAnimationPreferences(mode: MotionMode, speed: AnimationSpeed) {
@@ -60,17 +94,8 @@ export class BoardScene extends Phaser.Scene {
     this.load.on('loaderror', () => this.onLoadError());
   }
   create() {
-    this.clearFx = new ClearEffects(this);
-    const cells = this.add.graphics();
-    for (let i = 0; i < COLS * ROWS; i++) {
-      const { x, y } = center(i);
-      cells.fillStyle((Math.floor(i / COLS) + i % COLS) % 2 ? 0x23382e : 0x2a4035, .94);
-      cells.fillRoundedRect(x - SIZE / 2 + 3, y - SIZE / 2 + 3, SIZE - 6, SIZE - 6, 9);
-      cells.lineStyle(1, 0xd5be7b, .12);
-      cells.strokeRoundedRect(x - SIZE / 2 + 3, y - SIZE / 2 + 3, SIZE - 6, SIZE - 6, 9);
-      cells.fillStyle(0xffffff, .035);
-      cells.fillRoundedRect(x - SIZE / 2 + 4, y - SIZE / 2 + 4, SIZE - 8, 20, 8);
-    }
+    this.clearFx = new ClearEffects(this, this.layout);
+    this.cells = this.add.graphics(); this.drawCells();
     this.selection = this.add.graphics().setDepth(10);
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (!this.enabled) return;
@@ -131,13 +156,12 @@ export class BoardScene extends Phaser.Scene {
     else this.showHint([this.keyboardCell], false);
   };
   private cellAt(x: number, y: number) {
-    const c = Math.floor((x - PAD) / SIZE), r = Math.floor((y - PAD) / SIZE);
-    return c >= 0 && c < COLS && r >= 0 && r < ROWS ? r * COLS + c : null;
+    return this.layout.cellAt(x, y);
   }
   private isInspectTarget(cell: number, x: number, y: number) {
     const tile = this.board[cell];
     if (!tile || tile.special === 'normal') return false;
-    const pos = center(cell);
+    const pos = this.layout.center(cell);
     return Math.hypot(x - pos.x - INSPECT_X, y - pos.y - INSPECT_Y) <= INSPECT_HIT_RADIUS;
   }
   private cancelPendingClick() {
@@ -183,9 +207,10 @@ export class BoardScene extends Phaser.Scene {
   private select(i: number | null) {
     this.selected = i; this.selection.clear();
     if (i === null) return;
-    const { x, y } = center(i);
-    this.selection.lineStyle(3, 0xf6dfa2, 1).strokeRoundedRect(x - 42, y - 42, 84, 84, 10);
-    this.selection.fillStyle(0xffe3a1, .1).fillRoundedRect(x - 42, y - 42, 84, 84, 10);
+    const { x, y } = this.layout.center(i);
+    const height = this.layout.rowHeight - 6;
+    this.selection.lineStyle(3, 0xf6dfa2, 1).strokeRoundedRect(x - 42, y - height / 2, 84, height, 10);
+    this.selection.fillStyle(0xffe3a1, .1).fillRoundedRect(x - 42, y - height / 2, 84, height, 10);
   }
   private createGem(tile: Tile): GemView {
     const container = this.add.container(0, 0) as GemView;
@@ -217,6 +242,7 @@ export class BoardScene extends Phaser.Scene {
     return container;
   }
   renderState(state: State, animate = false, kind: Frame['kind'] = 'drop'): Promise<void> {
+    this.latest = state;
     this.cancelPendingClick(); this.down = null; this.board = state.board;
     if (!this.ready) { this.initial = state; return Promise.resolve(); }
     const currentIds = new Set(state.board.filter(Boolean).map(t => t!.id));
@@ -226,11 +252,11 @@ export class BoardScene extends Phaser.Scene {
     state.board.forEach((tile, i) => {
       if (!tile) return;
       let view = this.views.get(tile.id);
-      const { x, y } = center(i);
+      const { x, y } = this.layout.center(i);
       if (view && view.gemKind !== `${tile.color}:${tile.special}`) { view.destroy(); this.views.delete(tile.id); view = undefined; }
       if (!view) {
         view = this.createGem(tile); this.views.set(tile.id, view);
-        view.setPosition(x, animate && kind === 'drop' && !this.reducedMotion ? y - SIZE * 2 : y);
+        view.setPosition(x, animate && kind === 'drop' && !this.reducedMotion ? y - this.layout.rowHeight * 2 : y);
         if (animate) view.setAlpha(0);
       }
       if (animate) {
@@ -278,7 +304,7 @@ export class BoardScene extends Phaser.Scene {
     await this.delay(this.timings.settle);
     this.board = state.board;
     const births = cells.map(i => {
-      const tile = state.board[i]!, pos = center(i), view = this.createGem(tile);
+      const tile = state.board[i]!, pos = this.layout.center(i), view = this.createGem(tile);
       view.setPosition(pos.x, pos.y).setAlpha(0).setScale(this.reducedMotion ? 1 : .18);
       this.views.set(tile.id, view);
       return view;
@@ -291,7 +317,7 @@ export class BoardScene extends Phaser.Scene {
       effect.clear();
       const p = progress.value, opacity = Math.sin(Math.PI * p);
       cells.forEach(i => {
-        const { x, y } = center(i), kind = state.board[i]!.special;
+        const { x, y } = this.layout.center(i), kind = state.board[i]!.special;
         const color = kind === 'bomb' ? 0xffc790 : kind === 'cross' ? 0xbde6ff : 0xe2c3ff;
         if (this.reducedMotion) {
           effect.fillStyle(color, opacity * .12).fillRoundedRect(x - 39, y - 39, 78, 78, 9);
@@ -323,6 +349,7 @@ export class BoardScene extends Phaser.Scene {
     this.scoreLabels.clear();
   }
   async play(frame: Frame, previous: State) {
+    this.latest = frame.state;
     this.select(null); this.clearHints();
     const timings = this.timings;
     if (frame.kind === 'clear') {
@@ -340,9 +367,9 @@ export class BoardScene extends Phaser.Scene {
       const fx = this.clearFx!.play(frame, previous, this.reducedMotion, this.animationSpeed);
       this.onClear(frame, tier, cells.length);
       this.clearScoreLabels();
-      const positions = cells.map(center);
-      const midpoint = positions.length ? { x: positions.reduce((sum, p) => sum + p.x, 0) / positions.length, y: positions.reduce((sum, p) => sum + p.y, 0) / positions.length } : center(27);
-      const x = Phaser.Math.Clamp(midpoint.x, 85, CANVAS_WIDTH - 85), y = Phaser.Math.Clamp(midpoint.y, 92, CANVAS_HEIGHT - 48);
+      const positions = cells.map(this.layout.center);
+      const midpoint = positions.length ? { x: positions.reduce((sum, p) => sum + p.x, 0) / positions.length, y: positions.reduce((sum, p) => sum + p.y, 0) / positions.length } : this.layout.center(27);
+      const x = Phaser.Math.Clamp(midpoint.x, 85, CANVAS_WIDTH - 85), y = Phaser.Math.Clamp(midpoint.y, 92, this.layout.height - 48);
       const label = this.add.text(x, y, `+${frame.points ?? cells.length * 10}`, { fontFamily: 'Georgia', fontSize: `${34 + tier * 7}px`, fontStyle: 'bold', color: tier >= 2 ? '#fff2c4' : '#fff8e4', stroke: '#193123', strokeThickness: 6, shadow: { color: '#d7ab4a', blur: tier * 5, fill: true } }).setOrigin(.5).setDepth(60).setName('clear-score');
       this.scoreLabels.add(label);
       this.tween({ targets: label, y: this.reducedMotion ? y : y - 40 - tier * 6, alpha: 0, duration: Math.max(timings.score, fx.duration + paceDuration(220)), ease: 'Sine.easeIn' }).then(() => { this.scoreLabels.delete(label); label.destroy(); });
@@ -387,12 +414,13 @@ export class BoardScene extends Phaser.Scene {
   showHint(cells: number[], pulsing = true, color = 0xffe4a1, filled = false) {
     this.clearHints();
     cells.forEach(i => {
-      const { x, y } = center(i);
+      const { x, y } = this.layout.center(i);
       const mark = this.add.graphics().setDepth(8);
-      mark.lineStyle(3, color, 1).strokeRoundedRect(x - 41, y - 41, 82, 82, 10);
+      const height = this.layout.rowHeight - 8;
+      mark.lineStyle(3, color, 1).strokeRoundedRect(x - 41, y - height / 2, 82, height, 10);
       if (filled) {
-        mark.fillStyle(color, .12).fillRoundedRect(x - 39, y - 39, 78, 78, 9);
-        mark.lineStyle(1, 0xfff0cf, .65).strokeRoundedRect(x - 36, y - 36, 72, 72, 7);
+        mark.fillStyle(color, .12).fillRoundedRect(x - 39, y - height / 2 + 2, 78, height - 4, 9);
+        mark.lineStyle(1, 0xfff0cf, .65).strokeRoundedRect(x - 36, y - height / 2 + 5, 72, height - 10, 7);
       }
       this.hintMarks.push(mark);
       if (pulsing && !this.reducedMotion) this.tweens.add({ targets: mark, alpha: .25, duration: paceDuration(450), yoyo: true, repeat: 3 });
@@ -402,5 +430,11 @@ export class BoardScene extends Phaser.Scene {
 }
 
 export function createBoard(scene: BoardScene) {
-  return new Phaser.Game({ type: Phaser.AUTO, parent: 'board-canvas', width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transparent: true, antialias: true, scene: [scene], scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }, audio: { noAudio: true }, banner: false });
+  const mobile = matchMedia('(max-width:680px)');
+  scene.setSquareLayout(mobile.matches);
+  const game = new Phaser.Game({ type: Phaser.AUTO, parent: 'board-canvas', width: CANVAS_WIDTH, height: scene.getBoardLayout().height, transparent: true, antialias: true, scene: [scene], scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }, audio: { noAudio: true }, banner: false });
+  const resize = () => scene.setSquareLayout(mobile.matches);
+  mobile.addEventListener('change', resize);
+  game.events.once('destroy', () => mobile.removeEventListener('change', resize));
+  return game;
 }

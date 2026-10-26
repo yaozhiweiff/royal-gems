@@ -42,3 +42,28 @@ body{line-height:1.5}.hero-portrait{height:var(--portrait-height)!important;widt
 @media(max-width:680px){.companion{grid-template-columns:110px minmax(0,1fr)}.skill-list{min-width:0}}
 @media(min-width:1050px) and (max-height:800px){.site-header{height:64px}.brand-seal{height:40px;width:35px}.brand strong{font-size:20px}.brand small{font-size:8px}.game-layout{grid-template-columns:305px 460px;gap:60px;max-width:881px;margin-top:18px}.portrait-stage{height:310px}.character-caption h1{font-size:28px}.character-caption p{font-size:9px}.chapter-heading{margin-bottom:12px}.chapter-heading h2{font-size:22px;margin-top:4px}.chapter-heading .eyebrow{font-size:8px}.best-score strong{font-size:18px}.scoreboard{padding:10px 14px;margin-bottom:12px}.score-number>b{font-size:21px}.turns strong{font-size:25px}.avatar{height:44px;width:44px}.character-roster{gap:8px}.character-select-label{margin:10px 5px}.character-choice{font-size:10px;gap:6px}.energy-panel{margin-top:13px;padding-top:10px}.energy-heading{font-size:10px}.skill-icon{width:29px;height:29px}.skill-item strong{font-size:10px}.skill-item small{font-size:8px}.skill-list{gap:10px}.site-footer{margin-top:14px;padding-block:14px}.board-message{min-height:28px;margin:2px 0 5px;font-size:9px}.primary-button{min-height:43px}.difficulty-control button{padding-block:8px}.difficulty-control button[aria-pressed=true]{padding-block:7px}.play-actions{min-height:42px}.setup-actions>.primary-button{padding-block:10px}}
 .rankings-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:12px 0;border-bottom:1px solid var(--line)}.rankings-bar button{flex-shrink:0;padding:0;color:var(--gold-light);font-size:11px}.ranking-status{font-size:11px;color:var(--muted);line-height:1.8;text-align:right;overflow-wrap:anywhere}.ranking-personal{margin:18px 0 10px;padding:12px 14px;border:1px solid var(--line);background:#d1b4780b;color:var(--gold-light);font-size:12px;line-height:1.9;overflow-wrap:anywhere}@media(max-width:560px){.rankings-bar{flex-wrap:wrap;gap:5px}.ranking-status{flex-basis:100%;text-align:left;font-size:11px}.ranking-personal{padding:10px;font-size:11px}}
+/* Phone layout keeps character selection above an enlarged, genuinely square canvas. */
+@media(max-width:680px){
+  body{min-width:320px}
+  .site-header{height:64px;padding-inline:14px}
+  .game-layout{padding-inline:10px;margin-top:14px;gap:16px}
+  .companion{order:0;grid-template-columns:76px minmax(0,1fr);column-gap:12px;padding:0 4px 14px;border-top:0;border-bottom:1px solid var(--line)}
+  .challenge{order:1;min-width:0}
+  .portrait-stage{height:120px}
+  .character-caption h1{font-size:17px;letter-spacing:2px}
+  .character-select-label{margin-bottom:8px;font-size:10px}
+  .character-roster{gap:6px}
+  .character-choice{min-height:60px;font-size:10px}
+  .avatar{width:44px;height:44px}
+  .energy-heading{margin-top:8px}
+  .energy-panel .skill-list{margin-top:11px;gap:8px}
+  .skill-item{min-height:44px;padding:7px 4px}
+  .skill-item strong{font-size:11px}
+  .chapter-heading{margin-bottom:12px;padding-inline:4px}
+  .scoreboard{margin-bottom:12px;padding:10px 12px}
+  .board-frame{padding:5px}
+  .board-frame:before{inset:3px}
+  #board-canvas{aspect-ratio:1}
+  .board-message,.setup-actions,.rankings-bar,.play-actions{margin-inline:4px}
+  .play-actions .text-button{min-height:44px}
+}

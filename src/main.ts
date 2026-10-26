@@ -208,6 +208,7 @@ function updateControls() {
   document.querySelectorAll<HTMLButtonElement>('[data-character], [data-difficulty]').forEach(b => b.disabled = !ready || busy);
   $('#character-select-label').textContent = ready ? '选择你的同行者' : `与${CHARACTERS[character].name}同行`;
   scene.enabled = loaded && playing && !busy && !modal.open && !!onlinePlayer;
+  scene.setLayoutBusy(busy);
   $('.board-frame').classList.toggle('playing', playing);
 }
 function toast(message: string) {
@@ -444,5 +445,6 @@ if (import.meta.env.DEV) {
     load: (state: Partial<State>) => { clearFeedback(); scene.clearEffects(); Object.assign(engine.state, state); void scene.renderState(engine.snapshot()); updateHUD(engine.snapshot()); updateControls(); },
     newTile: (color: number, special = 'normal') => engine.tile(color, special as 'normal'),
     assets: GEMS,
+    layout: () => scene.getBoardLayout(),
   } });
 }

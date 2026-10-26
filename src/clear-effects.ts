@@ -2,9 +2,8 @@ import Phaser from 'phaser';
 import { COLS, ROWS, type Frame, type State } from './engine';
 import { animationTimings, paceDuration, type AnimationSpeed, type MotionMode } from './motion';
 import type { Combination, CombinationKind } from './combinations';
+import { BoardLayout, CELL_SIZE as SIZE, BOARD_PAD as PAD } from './board-layout';
 
-const SIZE = 90, PAD = 12;
-const WIDTH = COLS * SIZE + PAD * 2, HEIGHT = ROWS * SIZE + PAD * 2;
 const GOLD = 0xf5d797, IVORY = 0xfff3d3;
 const COLORS = [0xff796c, 0x8ce7ff, 0xb5ed82, 0xe4a5ff, 0xffdb72];
 const TEXTURES = { glow: 'clear-fx-glow', star: 'clear-fx-star', shard: 'clear-fx-shard' };
@@ -17,7 +16,6 @@ type EffectStats = {
   mode: MotionMode; speed: AnimationSpeed;
   combination?: CombinationKind;
 };
-const center = (i: number): Point => ({ x: PAD + (i % COLS + .5) * SIZE, y: PAD + (Math.floor(i / COLS) + .5) * SIZE });
 const quadratic = (start: Point, bend: Point, end: Point, t: number): Point => ({
   x: (1 - t) ** 2 * start.x + 2 * (1 - t) * t * bend.x + t * t * end.x,
   y: (1 - t) ** 2 * start.y + 2 * (1 - t) * t * bend.y + t * t * end.y,
@@ -38,7 +36,7 @@ export class ClearEffects {
     serial: 0, tier: 0, count: 0, peakObjects: 0, reducedMotion: false, duration: 0, mode: 'full', speed: 'normal',
   };
 
-  constructor(private readonly scene: Phaser.Scene) {}
+  constructor(private readonly scene: Phaser.Scene, private readonly layout: BoardLayout) {}
 
   get stats(): Readonly<EffectStats> {
     return { ...this.last, activeObjects: this.objects.size + (this.layer ? 1 : 0) };
@@ -63,7 +61,7 @@ export class ClearEffects {
       const marks = this.graphics('fx-reduced-clear');
       if (marks) {
         cells.forEach(i => {
-          const p = center(i), tile = previous.board[i]!;
+          const p = this.layout.center(i), tile = previous.board[i]!;
           const color = tile.special === 'ultimate' ? GOLD : COLORS[tile.color] ?? GOLD;
           marks.fillStyle(color, .16).fillRoundedRect(p.x - 39, p.y - 39, 78, 78, 9);
           marks.fillStyle(color, .12).fillCircle(p.x, p.y, 29);
@@ -74,7 +72,7 @@ export class ClearEffects {
       }
     } else {
       this.prepareTextures();
-      const points = cells.map(center);
+      const points = cells.map(this.layout.center);
       const origin = { x: points.reduce((sum, p) => sum + p.x, 0) / cells.length, y: points.reduce((sum, p) => sum + p.y, 0) / cells.length };
       const cleared = new Set(cells);
       const isConversion = frame.kind === 'combine';
@@ -87,19 +85,19 @@ export class ClearEffects {
       // Macro effects go behind the individual fragments, preserving the cell silhouettes.
       this.wave(origin, tier, duration, fullBoardUltimate);
       if (frame.kind === 'clear' && frame.combination) this.combinationBlast(frame.combination, duration);
-      sources.filter(i => previous.board[i]!.special === 'bomb').slice(0, 6).forEach(i => this.bomb(center(i), duration));
-      sources.filter(i => previous.board[i]!.special === 'cross').slice(0, 5).forEach(i => this.cross(center(i), duration));
-      if (ultimates.length) this.ultimate(ultimates.slice(0, 2).map(center), cells, previous, duration, fullBoardUltimate);
+      sources.filter(i => previous.board[i]!.special === 'bomb').slice(0, 6).forEach(i => this.bomb(this.layout.center(i), duration));
+      sources.filter(i => previous.board[i]!.special === 'cross').slice(0, 5).forEach(i => this.cross(this.layout.center(i), duration));
+      if (ultimates.length) this.ultimate(ultimates.slice(0, 2).map(this.layout.center), cells, previous, duration, fullBoardUltimate);
       if (isConversion && frame.combination) {
         const source = frame.combination.pair.find(i => previous.board[i]?.special === 'ultimate');
-        if (source !== undefined) this.ultimate([center(source)], cells, previous, duration, false);
+        if (source !== undefined) this.ultimate([this.layout.center(source)], cells, previous, duration, false);
       }
 
       const requested = Math.min(MAX_PARTICLES, cells.length * [4, 5, 6, 7][tier]);
       const perCell = Math.floor(requested / cells.length), remainder = requested % cells.length;
       const comboBoost = Math.min(3, Math.max(0, (frame.combo ?? 1) - 1));
       cells.forEach((cell, order) => {
-        const p = center(cell), tile = previous.board[cell]!;
+        const p = this.layout.center(cell), tile = previous.board[cell]!;
         const color = tile.special === 'ultimate' ? GOLD : COLORS[tile.color] ?? GOLD;
         const delay = paceDuration(tier ? Math.min(48, Math.hypot(p.x - origin.x, p.y - origin.y) / 9) : order * 9);
         this.cellBurst(p, color, tier, duration, delay, order);
@@ -205,7 +203,7 @@ export class ClearEffects {
 
   private wave(origin: Point, tier: number, duration: number, fullBoard: boolean) {
     if (!tier) return;
-    const p = fullBoard ? { x: WIDTH / 2, y: HEIGHT / 2 } : origin;
+    const p = fullBoard ? { x: this.layout.width / 2, y: this.layout.height / 2 } : origin;
     this.ring(p, 40, GOLD, tier === 1 ? .58 : .78, [0, 2.6, 5.3, 9.5][tier], duration, 0);
     if (tier >= 2) {
       this.ring(p, 37, GOLD, .5, tier === 2 ? 4.4 : 8.4, duration - paceDuration(30), paceDuration(55), 'fx-wave-echo');
@@ -229,12 +227,12 @@ export class ClearEffects {
   }
 
   private combinationBlast(combination: Combination, duration: number) {
-    const p = center(combination.origin), row = Math.floor(combination.origin / COLS), column = combination.origin % COLS;
+    const p = this.layout.center(combination.origin), row = Math.floor(combination.origin / COLS), column = combination.origin % COLS;
     if (combination.kind === 'bomb-bomb') {
       const area = this.graphics('fx-combination-bomb-5x5');
       if (area) {
-        const left = Math.max(PAD, p.x - SIZE * 2.5), right = Math.min(WIDTH - PAD, p.x + SIZE * 2.5);
-        const top = Math.max(PAD, p.y - SIZE * 2.5), bottom = Math.min(HEIGHT - PAD, p.y + SIZE * 2.5);
+        const left = Math.max(PAD, p.x - SIZE * 2.5), right = Math.min(this.layout.width - PAD, p.x + SIZE * 2.5);
+        const top = Math.max(PAD, p.y - this.layout.rowHeight * 2.5), bottom = Math.min(this.layout.height - PAD, p.y + this.layout.rowHeight * 2.5);
         area.lineStyle(3, GOLD, .9).strokeRoundedRect(left + 4, top + 4, right - left - 8, bottom - top - 8, 14);
         area.fillStyle(GOLD, .055).fillRoundedRect(left + 4, top + 4, right - left - 8, bottom - top - 8, 14);
         this.animate(area, { alpha: 0, duration });
@@ -242,15 +240,15 @@ export class ClearEffects {
       this.ring(p, 38, IVORY, .9, 6.3, duration, 0, 'fx-combination-bomb-wave');
     } else if (combination.kind === 'bomb-cross') {
       for (let offset = -1; offset <= 1; offset++) {
-        if (row + offset >= 0 && row + offset < ROWS) this.combinationBeam({ x: PAD, y: p.y + offset * SIZE }, { x: WIDTH - PAD, y: p.y + offset * SIZE }, duration);
-        if (column + offset >= 0 && column + offset < COLS) this.combinationBeam({ x: p.x + offset * SIZE, y: PAD }, { x: p.x + offset * SIZE, y: HEIGHT - PAD }, duration);
+        if (row + offset >= 0 && row + offset < ROWS) this.combinationBeam({ x: PAD, y: p.y + offset * this.layout.rowHeight }, { x: this.layout.width - PAD, y: p.y + offset * this.layout.rowHeight }, duration);
+        if (column + offset >= 0 && column + offset < COLS) this.combinationBeam({ x: p.x + offset * SIZE, y: PAD }, { x: p.x + offset * SIZE, y: this.layout.height - PAD }, duration);
       }
     } else if (combination.kind === 'cross-cross') {
       for (const [dr, dc] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]]) {
         let r = row, c = column;
         while (r + dr >= 0 && r + dr < ROWS && c + dc >= 0 && c + dc < COLS) { r += dr; c += dc; }
-        const last = center(r * COLS + c);
-        this.combinationBeam(p, { x: last.x + dc * SIZE * .4, y: last.y + dr * SIZE * .4 }, duration);
+        const last = this.layout.center(r * COLS + c);
+        this.combinationBeam(p, { x: last.x + dc * SIZE * .4, y: last.y + dr * this.layout.rowHeight * .4 }, duration);
       }
     }
   }
@@ -267,8 +265,8 @@ export class ClearEffects {
     const area = this.graphics('fx-bomb-area');
     if (area) {
       area.setPosition(p.x, p.y).setAlpha(.65);
-      area.lineStyle(1.5, GOLD, .65).strokeRoundedRect(-SIZE * 1.5 + 5, -SIZE * 1.5 + 5, SIZE * 3 - 10, SIZE * 3 - 10, 16);
-      area.fillStyle(GOLD, .035).fillRoundedRect(-SIZE * 1.5 + 5, -SIZE * 1.5 + 5, SIZE * 3 - 10, SIZE * 3 - 10, 16);
+      area.lineStyle(1.5, GOLD, .65).strokeRoundedRect(-SIZE * 1.5 + 5, -this.layout.rowHeight * 1.5 + 5, SIZE * 3 - 10, this.layout.rowHeight * 3 - 10, 16);
+      area.fillStyle(GOLD, .035).fillRoundedRect(-SIZE * 1.5 + 5, -this.layout.rowHeight * 1.5 + 5, SIZE * 3 - 10, this.layout.rowHeight * 3 - 10, 16);
       this.animate(area, { alpha: 0, duration: duration * .88, ease: 'Sine.easeIn' });
     }
     this.ring(p, 32, GOLD, .8, 4.1, duration * .9, 0, 'fx-bomb-shockwave');
@@ -281,7 +279,7 @@ export class ClearEffects {
       if (!beam) return;
       const horizontal = axis === 'horizontal';
       const start = horizontal ? { x: PAD - p.x, y: 0 } : { x: 0, y: PAD - p.y };
-      const end = horizontal ? { x: WIDTH - PAD - p.x, y: 0 } : { x: 0, y: HEIGHT - PAD - p.y };
+      const end = horizontal ? { x: this.layout.width - PAD - p.x, y: 0 } : { x: 0, y: this.layout.height - PAD - p.y };
       beam.setPosition(p.x, p.y).setAlpha(.95);
       beam.lineStyle(20, GOLD, .09).lineBetween(start.x, start.y, end.x, end.y);
       beam.lineStyle(7, GOLD, .4).lineBetween(start.x, start.y, end.x, end.y);
@@ -298,7 +296,7 @@ export class ClearEffects {
     const stride = Math.max(1, Math.ceil(cells.length / (fullBoard ? 24 : 20)));
     let cometCount = 0;
     cells.filter((_, n) => n % stride === 0).forEach((cell, index) => {
-      const start = sources[index % sources.length], end = center(cell);
+      const start = sources[index % sources.length], end = this.layout.center(cell);
       const dx = end.x - start.x, dy = end.y - start.y, length = Math.hypot(dx, dy);
       if (length < 10) return;
       const color = COLORS[previous.board[cell]!.color] ?? GOLD;
@@ -321,7 +319,7 @@ export class ClearEffects {
     this.animate(arcs, { alpha: 0, duration: duration * .95, ease: 'Sine.easeIn' });
     sources.forEach(p => this.ring(p, 25, IVORY, .8, fullBoard ? 5.5 : 3.5, duration * .9, 0, 'fx-ultimate-origin'));
     if (fullBoard) {
-      const p = { x: WIDTH / 2, y: HEIGHT / 2 };
+      const p = { x: this.layout.width / 2, y: this.layout.height / 2 };
       COLORS.forEach((color, index) => this.ring(p, 45 + index * 5, color, .55, 8 - index * .45, duration - paceDuration(index * 15), paceDuration(index * 22), 'fx-ultimate-rainbow-wave'));
     }
   }
